@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:latest
+    container_name: mysql_container
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3307:3306"  # Expose MySQL on port 3306
+    volumes:
+      - mysql_data:/var/lib/mysql  # Persist database data
+      - ./db_init:/docker-entrypoint-initdb.d  # Load DDL scripts at startup
+
+  web:
+    build: ./webapp
+    container_name: flask_app
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "8080:5000"  # Expose Flask on port 5000
+    depends_on:
+      - db           # Wait for the database container to be ready
+
+volumes:
+  mysql_data:
