@@ -21,9 +21,24 @@ import os
 import logging
 
 from flask import Flask, jsonify, request
-import mysql.connector
+
+from tools.db_client import DBClient
+
+import logging
+from flask import Flask
 
 app = Flask(__name__)
+
+# Set up logging configuration
+logging.basicConfig(
+    filename="app.log",  # Name of the log file
+    level=logging.INFO,  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",  # Log format
+    datefmt="%Y-%m-%d %H:%M:%S",  # Date format in the log file
+)
+
+# Log messages to verify
+logging.info("Logging setup complete. Flask app has started.")
 
 # Database configuration
 db_config = {
@@ -32,6 +47,8 @@ db_config = {
     "password": os.getenv("MYSQL_PASSWORD", "password"),
     "database": os.getenv("MYSQL_DATABASE", "testdb"),
 }
+
+db_client = DBClient()
 
 
 @app.route("/")
@@ -42,18 +59,8 @@ def healthcheck():
     Returns:
         JSON: A message indicating successful connection or an error message.
     """
-    try:
-        # Establish database connection
-        connection = mysql.connector.connect(**db_config)
-        cursor = connection.cursor()
-        cursor.execute("SELECT DATABASE();")
-        database_name = cursor.fetchone()
-        cursor.close()
-        connection.close()
-        return jsonify({"message": "Connected to MySQL!", "database": database_name})
-    except mysql.connector.Error as err:
-        # Return an error message in case of database connection failure
-        return jsonify({"error": str(err)}), 500
+
+    return jsonify(db_client.check_health())
 
 
 @app.route("/query", methods=["POST"])
@@ -70,60 +77,25 @@ def query():
               Includes error details if an error occurs.
     """
     data = request.json
+
     logging.info(f"Received payload {data}")
 
-    # Retrieve the SQL command from the request data
-    sql_command = data.get("sql_command")
+    query_params = {"query_type": data.get("process")}
+    query_params.update(data.get("values"))
 
-    if not sql_command:
-        # Return an error if no SQL command is provided
-        return jsonify({"error": "The 'sql_command' key is required."}), 400
+    logging.info(query_params)
 
     try:
-        # Establish database connection
-        connection = mysql.connector.connect(**db_config)
-        cursor = connection.cursor()
 
-        # Execute the SQL command
-        cursor.execute(sql_command)
+        results = db_client(**query_params)
 
-        # If the command is an INSERT, commit changes and retrieve the new record ID
-        if sql_command.strip().lower().startswith("insert"):
-            connection.commit()
-            new_id = cursor.lastrowid
-            response = {
-                "response": "Record inserted successfully!",
-                "command": sql_command,
-                "new_record_id": new_id,
-            }
+        logging.info(results)
 
-        # For UPDATE or DELETE commands, commit changes and acknowledge success
-        elif sql_command.strip().lower().startswith(("update", "delete")):
-            connection.commit()
-            response = {
-                "response": "Command executed successfully!",
-                "command": sql_command,
-            }
+        return jsonify({"response": results})
 
-        # For SELECT commands, fetch results and include them in the response
-        else:
-            result = cursor.fetchall()
-            columns = (
-                [desc[0] for desc in cursor.description] if cursor.description else []
-            )
-            response = {
-                "response": "Query executed successfully!",
-                "command": sql_command,
-                "result": [dict(zip(columns, row)) for row in result],
-            }
+    except Exception as e:
 
-        cursor.close()
-        connection.close()
-        return jsonify(response)
-
-    except mysql.connector.Error as err:
-        # Return an error message if any MySQL error occurs during execution
-        return jsonify({"error": str(err)}), 500
+        logging.error(e.with_traceback())
 
 
 if __name__ == "__main__":
