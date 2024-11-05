@@ -7,11 +7,11 @@ election management. It handles HTTP requests to a specified API route
 and processes responses for various query types.
 """
 
+import os
 import logging
 
-import requests
-
 from tools.query import Query
+import mysql.connector
 
 
 class DBClient:
@@ -27,14 +27,13 @@ class DBClient:
         query_type_map (dict): A mapping of query types to corresponding handler methods.
     """
 
-    def __init__(self, api_route: str) -> None:
+    def __init__(self) -> None:
         """
         Initializes the DBClient with the given API route.
 
         Args:
             api_route (str): The base URL for the API.
         """
-        self.api_route = api_route
         self.query_type_map = {
             "login": self.__validate_login,
             "register": self.__register,
@@ -44,6 +43,13 @@ class DBClient:
             "vote": self.__vote,
             "create_election": self.__create_election,
             "list_election_candidates": self.__view_elections,
+        }
+
+        self.db_config = {
+            "host": os.getenv("MYSQL_HOST", "db"),
+            "user": os.getenv("MYSQL_USER", "user"),
+            "password": os.getenv("MYSQL_PASSWORD", "password"),
+            "database": os.getenv("MYSQL_DATABASE", "testdb"),
         }
 
         self.user_logged_in = None
@@ -64,6 +70,7 @@ class DBClient:
         query_type = kwargs.get("query_type")
         handler = self.query_type_map.get(query_type)
         if handler:
+
             return handler(**kwargs)
         raise ValueError(f"Invalid query_type: {query_type}")
 
@@ -78,20 +85,23 @@ class DBClient:
             bool: True if the health check is successful, False otherwise.
         """
         try:
-            response = requests.get(f"{self.api_route}/", timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                print("\nHealth Check Successful!")
-                print("Message:", data.get("message"))
-                print("Database:", data.get("database"))
-                input("\nPress enter to continue...")
-                return True
-            print("\nHealth Check Failed. Status Code:", response.status_code)
-            print("Response:", response.text)
-            return False
-        except requests.RequestException as e:
-            logging.error("Error connecting to the Backend API: %s", e)
-            return False
+            # Establish database connection
+            connection = mysql.connector.connect(**self.db_config)
+            cursor = connection.cursor()
+            cursor.execute("SELECT DATABASE();")
+            database_name = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            return {
+                "message": "Connected to MySQL!",
+                "database": database_name,
+            }
+
+        except mysql.connector.Error as err:
+            # Return an error message in case of database connection failure
+            return {
+                "error": str(err),
+            }
 
     def __validate_login(self, **kwargs) -> bool:
         """
@@ -106,6 +116,8 @@ class DBClient:
             bool: True if the password matches, False otherwise.
         """
         result = self.__query(**kwargs)
+
+        logging.info(result)
 
         if not result["result"]:
             return False
@@ -208,14 +220,57 @@ class DBClient:
         Returns:
             dict: The response from the API, or None if the query fails.
         """
-        sql_query = Query(**kwargs)
-        response = requests.post(
-            f"{self.api_route}/query", json={"sql_command": sql_query()}, timeout=10
-        )
-        if response.status_code == 200:
-            logging.debug("Query successful: %s", response.json())
-            return response.json()
-        logging.error(
-            "Query failed with status %s: %s", response.status_code, response.text
-        )
-        return None
+        query = Query(**kwargs)
+
+        sql_query = query()
+
+        logging.info(sql_query)
+
+        try:
+            # Establish database connection
+            connection = mysql.connector.connect(**self.db_config)
+            cursor = connection.cursor()
+
+            # Execute the SQL command
+            cursor.execute(sql_query)
+
+            # If the command is an INSERT, commit changes and retrieve the new record ID
+            if sql_query.strip().lower().startswith("insert"):
+                connection.commit()
+                new_id = cursor.lastrowid
+                response = {
+                    "response": "Record inserted successfully!",
+                    "command": sql_query,
+                    "new_record_id": new_id,
+                }
+
+            # For UPDATE or DELETE commands, commit changes and acknowledge success
+            elif sql_query.strip().lower().startswith(("update", "delete")):
+                connection.commit()
+                response = {
+                    "response": "Command executed successfully!",
+                    "command": sql_query,
+                }
+
+            # For SELECT commands, fetch results and include them in the response
+            else:
+                result = cursor.fetchall()
+                columns = (
+                    [desc[0] for desc in cursor.description]
+                    if cursor.description
+                    else []
+                )
+                response = {
+                    "response": "Query executed successfully!",
+                    "command": sql_query,
+                    "result": [dict(zip(columns, row)) for row in result],
+                }
+
+            cursor.close()
+            connection.close()
+            logging.info("response")
+            return response
+
+        except mysql.connector.Error as err:
+            # Return an error message if any MySQL error occurs during execution
+            return {"error": str(err)}, 500

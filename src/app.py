@@ -6,7 +6,7 @@ from datetime import datetime
 
 from tkcalendar import Calendar
 
-from tools.db_client import DBClient
+from tools.api_connector import APIConnector
 
 
 class ElectionApp:
@@ -16,7 +16,7 @@ class ElectionApp:
     logging in, and viewing election results.
 
     Attributes:
-        client (DBClient): An instance of the DBClient class to handle API calls.
+        api_connector (APIConnector): An instance of the APIConnector class to handle API calls.
         root (tk.Tk): The main Tkinter window for the application.
     """
 
@@ -27,10 +27,10 @@ class ElectionApp:
         Sets up the Tkinter window and login UI elements, including entry fields
         for username and password, and buttons for login, registration, and results view.
         """
-        # Initialize the client for API interactions
-        self.client = DBClient(api_route="http://localhost:8080")
+        # Initialize the api_connector for API interactions
+        self.api_connector = APIConnector(api_route="http://localhost:8080")
 
-        self.client.check_health()
+        self.api_connector.check_health()
 
         # Set up the main Tkinter window
         self.root = tk.Tk()
@@ -60,7 +60,7 @@ class ElectionApp:
         tk.Button(
             self.root,
             text="View Results",
-            command=lambda: ResultsViewer(self.root, self.client).show(),
+            command=lambda: ResultsViewer(self.root, self.api_connector).show(),
         ).pack(pady=5)
 
     def run(self):
@@ -77,18 +77,24 @@ class ElectionApp:
         Validates the user's login credentials.
 
         Retrieves the username and password from the input fields and sends
-        them to the DBClient for verification. If the credentials are valid,
+        them to the APIConnector for verification. If the credentials are valid,
         it proceeds to the main screen. If invalid, it shows an error message.
         """
         # Get username and password from input fields
         username = self.username_entry.get()
         password = self.password_entry.get()
 
-        # Check credentials via the DBClient's login API
-        if self.client(query_type="login", username=username, password=password):
-            # If login is successful, save the username in the client and show the main screen
-            self.client.user_logged_in = username
-            MainScreen(self.root, self.client).show()
+        # Check credentials via the APIConnector's login API
+        if self.api_connector(
+            process="login",
+            values={
+                "username": username,
+                "password": password,
+            },
+        ):
+            # If login is successful, save the username in the api_connector and show the main screen
+            self.api_connector.user_logged_in = username
+            MainScreen(self.root, self.api_connector).show()
         else:
             # Show an error message if login fails
             messagebox.showerror("Login Failed", "Invalid username or password")
@@ -100,7 +106,7 @@ class ElectionApp:
         This method opens a new window where users can register by creating
         a new account. The registration screen is managed by the RegisterWindow class.
         """
-        RegisterWindow(self.root, self.client).show()
+        RegisterWindow(self.root, self.api_connector).show()
 
 
 class RegisterWindow:
@@ -110,20 +116,20 @@ class RegisterWindow:
     a new account.
 
     Attributes:
-        client (DBClient): An instance of the DBClient class to handle API calls.
+        api_connector (APIConnector): An instance of the APIConnector class to handle API calls.
         window (tk.Toplevel): The registration window displayed to the user.
     """
 
-    def __init__(self, parent, client):
+    def __init__(self, parent, api_connector):
         """
         Initializes the RegisterWindow class.
 
         Args:
             parent (tk.Tk or tk.Toplevel): The parent window that owns this registration window.
-            client (DBClient): The client instance used for API calls to register a new user.
+            api_connector (APIConnector): The api_connector instance used for API calls to register a new user.
         """
-        # Store the client instance for making API requests
-        self.client = client
+        # Store the api_connector instance for making API requests
+        self.api_connector = api_connector
 
         # Create a new top-level window for registration
         self.window = tk.Toplevel(parent)
@@ -155,7 +161,7 @@ class RegisterWindow:
         Registers a new user by sending the entered details to the API.
 
         Collects the username, email, and password from the input fields
-        and sends them to the client for registration. If successful,
+        and sends them to the api_connector for registration. If successful,
         displays a success message and closes the window. If registration
         fails, shows an error message.
         """
@@ -164,9 +170,14 @@ class RegisterWindow:
         email = self.email_entry.get()
         password = self.password_entry.get()
 
-        # Attempt to register the user with the client
-        if self.client(
-            query_type="register", username=username, email=email, password=password
+        # Attempt to register the user with the api_connector
+        if self.api_connector(
+            process="register",
+            values={
+                "username": username,
+                "email": email,
+                "password": password,
+            },
         ):
             # If registration is successful, show a confirmation and close the window
             messagebox.showinfo(
@@ -194,24 +205,24 @@ class MainScreen:
     It provides options to create an election, vote, and view results.
 
     Attributes:
-        client (DBClient): An instance of the DBClient class representing the logged-in user.
+        api_connector (APIConnector): An instance of the APIConnector class representing the logged-in user.
         window (tk.Toplevel): The main application window shown after login.
     """
 
-    def __init__(self, parent, client):
+    def __init__(self, parent, api_connector):
         """
         Initializes the MainScreen class.
 
         Args:
             parent (tk.Tk or tk.Toplevel): The parent window that this main screen will replace.
-            client (DBClient): The client instance representing the logged-in user.
+            api_connector (APIConnector): The api_connector instance representing the logged-in user.
         """
-        # Store the client instance for managing the user's session and actions
-        self.client = client
+        # Store the api_connector instance for managing the user's session and actions
+        self.api_connector = api_connector
 
         # Create a new top-level window for the main application screen
         self.window = tk.Toplevel(parent)
-        self.window.title(f"Election App - {self.client.user_logged_in}")
+        self.window.title(f"Election App - {self.api_connector.user_logged_in}")
         self.window.geometry("500x250")
 
         # Hide the parent window (typically the login window)
@@ -228,21 +239,21 @@ class MainScreen:
         tk.Button(
             self.window,
             text="Create Election",
-            command=lambda: NewElectionScreen(self.window, self.client).show(),
+            command=lambda: NewElectionScreen(self.window, self.api_connector).show(),
         ).pack(pady=10)
 
         # Button to open the voting window, opens VoteWindow
         tk.Button(
             self.window,
             text="Vote",
-            command=lambda: VoteWindow(self.window, self.client).show(),
+            command=lambda: VoteWindow(self.window, self.api_connector).show(),
         ).pack()
 
         # Button to view election results, opens ResultsViewer
         tk.Button(
             self.window,
             text="View Results",
-            command=lambda: ResultsViewer(self.window, self.client).show(),
+            command=lambda: ResultsViewer(self.window, self.api_connector).show(),
         ).pack(pady=10)
 
     def close(self):
@@ -250,14 +261,14 @@ class MainScreen:
         Closes the main screen window and logs out the user.
 
         This method destroys the main screen window, logs out the user
-        by resetting `user_logged_in` in the client, and restarts the
+        by resetting `user_logged_in` in the api_connector, and restarts the
         ElectionApp to show the login screen again.
         """
         # Destroy the main screen window
         self.window.destroy()
 
         # Log out the user by resetting the logged-in user attribute
-        self.client.user_logged_in = None
+        self.api_connector.user_logged_in = None
 
         # Restart the application by re-initializing ElectionApp
         ElectionApp().run()
@@ -283,20 +294,20 @@ class NewElectionScreen:
     It also features a calendar pop-up for date selection and validation for input data.
 
     Attributes:
-        client: The client instance used to communicate with the backend server.
+        api_connector: The api_connector instance used to communicate with the backend server.
         window: The main window for this screen, allowing user interaction.
         candidates: A list to store candidate details.
     """
 
-    def __init__(self, parent, client):
+    def __init__(self, parent, api_connector):
         """
-        Initializes the NewElectionScreen with the given parent window and client.
+        Initializes the NewElectionScreen with the given parent window and api_connector.
 
         Args:
             parent: The parent window that this screen will be a child of.
-            client: An instance of the client used for backend interactions.
+            api_connector: An instance of the api_connector used for backend interactions.
         """
-        self.client = client
+        self.api_connector = api_connector
         self.window = tk.Toplevel(parent)  # Create a new top-level window
         self.window.title("Create New Election")  # Set the window title
         self.window.geometry("600x600")  # Set the window size
@@ -527,13 +538,12 @@ class NewElectionScreen:
 
         # Collect election details
         election_details = {
-            "query_type": "create_election",
             "candidates": self.candidates,
             "election_name": self.election_name_entry.get(),
             "election_description": self.election_description_entry.get(),
             "start_date": self.start_date_entry.get(),
             "end_date": self.end_date_entry.get(),
-            "creator_username": self.client.user_logged_in,  # Get username from client
+            "creator_username": self.api_connector.user_logged_in,  # Get username from api_connector
         }
 
         # Ensure all fields are filled
@@ -565,7 +575,9 @@ class NewElectionScreen:
             return
 
         # Attempt to create the election
-        if self.client(**election_details):  # Call client to create election
+        if self.api_connector(
+            process="create_election", values=election_details
+        ):  # Call api_connector to create election
             messagebox.showinfo(
                 "Success", "The election was created successfully!"
             )  # Show success message
@@ -588,7 +600,7 @@ class ResultsViewer:
     viewing its details, and displaying the results of the selected election.
 
     Attributes:
-        client: The client instance used to communicate with the backend server.
+        api_connector: The api_connector instance used to communicate with the backend server.
         window: The main window for this screen, allowing user interaction.
         election_details: A list of details for all available elections.
         selected_election: A StringVar to hold the currently selected election.
@@ -596,15 +608,17 @@ class ResultsViewer:
         tree: A Treeview widget to display the results of the selected election.
     """
 
-    def __init__(self, parent, client):
+    def __init__(self, parent, api_connector):
         """
-        Initializes the ResultsViewer with the given parent window and client.
+        Initializes the ResultsViewer with the given parent window and api_connector.
 
         Args:
             parent: The parent window that this screen will be a child of.
-            client: An instance of the client used for backend interactions.
+            api_connector: An instance of the api_connector used for backend interactions.
         """
-        self.client = client  # Store the client instance for backend communication
+        self.api_connector = (
+            api_connector  # Store the api_connector instance for backend communication
+        )
         self.window = tk.Toplevel(parent)  # Create a new top-level window
         self.window.title("Election Results")  # Set the window title
         self.window.geometry("1000x600")  # Set the window size
@@ -612,8 +626,8 @@ class ResultsViewer:
         tk.Label(self.window, text="Please select one of the elections:").pack(pady=10)
 
         # Get election names for dropdown
-        election_details = client(
-            query_type="list_elections"
+        election_details = api_connector(
+            process="list_elections",
         )  # Fetch list of elections
         self.election_details = election_details  # Store election details for later use
         elections = [election["name"] for election in election_details]  # Extract names
@@ -696,8 +710,11 @@ class ResultsViewer:
         selected_election_name = (
             self.selected_election.get()
         )  # Get the currently selected election name
-        results = self.client(
-            query_type="view_results", election_name=selected_election_name
+        results = self.api_connector(
+            process="view_results",
+            values={
+                "election_name": selected_election_name,
+            },
         )  # Fetch results for the selected election
 
         # Clear existing data in the treeview
@@ -746,25 +763,27 @@ class VoteWindow:
     choose a candidate, and submit their vote.
 
     Attributes:
-        client: The client instance used to communicate with the backend server.
+        api_connector: The api_connector instance used to communicate with the backend server.
         window: The main window for this voting interface.
         selected_election: A StringVar to hold the currently selected election name.
         selected_candidate: A StringVar to hold the currently selected candidate name.
         candidate_menu: The dropdown menu for selecting candidates.
     """
 
-    def __init__(self, parent, client):
+    def __init__(self, parent, api_connector):
         """
-        Initializes the VoteWindow with the given parent window and client.
+        Initializes the VoteWindow with the given parent window and api_connector.
 
         Args:
             parent: The parent window that this voting interface will belong to.
-            client: An instance of the client used for backend interactions.
+            api_connector: An instance of the api_connector used for backend interactions.
         """
-        self.client = client  # Store the client instance for backend communication
+        self.api_connector = (
+            api_connector  # Store the api_connector instance for backend communication
+        )
         self.window = tk.Toplevel(parent)  # Create a new top-level window for voting
         self.window.title(
-            f"Vote as {self.client.user_logged_in}"
+            f"Vote as {self.api_connector.user_logged_in}"
         )  # Set the window title
         self.window.geometry("500x250")  # Set the size of the voting window
 
@@ -772,7 +791,7 @@ class VoteWindow:
         tk.Label(self.window, text="Please select an election").pack(pady=(30, 0))
 
         # Retrieve the list of live elections from the backend
-        elections = [e["name"] for e in client(query_type="list_live_elections")]
+        elections = [e["name"] for e in api_connector(process="list_live_elections")]
         self.selected_election = tk.StringVar(
             self.window
         )  # Variable to store the selected election
@@ -809,8 +828,11 @@ class VoteWindow:
         # Retrieve the candidates for the selected election from the backend
         candidates = [
             c["name"]
-            for c in self.client(
-                query_type="list_election_candidates", election_name=selected_election
+            for c in self.api_connector(
+                process="list_election_candidates",
+                values={
+                    "election_name": selected_election,
+                },
             )
         ]
         # Set the selected candidate to the first candidate if available
@@ -838,11 +860,13 @@ class VoteWindow:
         )  # Get the currently selected candidate
 
         # Submit the vote to the backend
-        if self.client(
-            query_type="vote",
-            username=self.client.user_logged_in,
-            election_name=election,
-            candidate_name=candidate,
+        if self.api_connector(
+            process="vote",
+            values={
+                "username": self.api_connector.user_logged_in,
+                "election_name": election,
+                "candidate_name": candidate,
+            },
         ):
             # Show a success message if the vote was submitted successfully
             messagebox.showinfo(
